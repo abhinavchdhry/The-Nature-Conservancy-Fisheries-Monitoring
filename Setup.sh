@@ -94,7 +94,7 @@ cd Build
 cmake .. -DCMAKE_INSTALL_PREFIX=~/.local -DCMAKE_BUILD_TYPE=Release
 make
 make install
-DEVICE="cuda" make test
+
 
 cd ..
 
