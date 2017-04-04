@@ -102,7 +102,7 @@ cd ..
 export CPATH=$CPATH:~/.local/include
 export LIBRARY_PATH=$LIBRARY_PATH:~/.local/lib
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.local/lib
-
+#Go inside libgpuarray folder
 python setup.py build
 python setup.py install --user
 cd
