@@ -1,4 +1,3 @@
-echo "This is gonna take a while..."
 sudo apt-get install python-dev python-pip
 sudo apt-get install python-numpy python-scipy python-matplotlib python-sklearn
 sudo apt-get install python-pandas

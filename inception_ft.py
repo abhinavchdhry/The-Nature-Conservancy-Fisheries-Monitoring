@@ -24,6 +24,8 @@ from keras.utils import get_file
 import cv2
 import vgg16bn
 from vgg16bn import Vgg16BN
+import theano
+from keras import backend as K
 
 # Perform a stratified split given a vector of images names
 # and a vector of corresponding image classes
@@ -84,14 +86,15 @@ def loadTrainAndValidationDatasets(size):
 
 	#TRAIN_PATH = "./sample/TRAIN/"
 	#VALIDATION_PATH = "./sample/VALID/"
-	train_generator = train_datagen.flow_from_directory(TRAIN_PATH, target_size=size, batch_size=1)
-	valid_generator = valid_datagen.flow_from_directory(VALIDATION_PATH, target_size=size, batch_size=1)
+	classes = ['ALB', 'BET', 'DOL', 'LAG', 'NoF', 'OTHER', 'SHARK', 'YFT']
+	train_generator = train_datagen.flow_from_directory(TRAIN_PATH, target_size=size, batch_size=1, class_mode='sparse', classes=classes)
+	valid_generator = valid_datagen.flow_from_directory(VALIDATION_PATH, target_size=size, batch_size=1, class_mode='sparse', classes=classes)
 
-	TEST_PATH = "./TEST/"
-	test_datagen = ImageDataGenerator()
-	test_generator = test_datagen.flow_from_directory(TEST_PATH, target_size=size, batch_size=1)
+#	TEST_PATH = "./TEST/"
+#	test_datagen = ImageDataGenerator()
+#	test_generator = test_datagen.flow_from_directory(TEST_PATH, target_size=size, batch_size=1)
 
-	print("### Creating datasets...")
+	print("### Loading datasets...")
 	train_len = len(glob.glob('./TRAIN/*/*.jpg'))
 	valid_len = len(glob.glob('./VALID/*/*.jpg'))
 
@@ -135,6 +138,7 @@ def createInceptionV3(input_shape=(3, 512, 512), optimizer=Adam(lr=0.001)):
 	base_model = InceptionV3(weights='imagenet', include_top=False, input_shape=input_shape)
 	
 	x = base_model.layers[-1].output
+	x = Dropout(0.5)(x)
 	x = GlobalAveragePooling2D()(x)
 	x = Dense(1024, activation='relu')(x)
 #	x = Dense(2048, activation='relu')(x)
@@ -145,6 +149,19 @@ def createInceptionV3(input_shape=(3, 512, 512), optimizer=Adam(lr=0.001)):
 
 	return(base_model, model)
 
+def createInceptionFCN(input_shape=(3, 512, 512), optimizer=Adam(lr=0.001)):
+        base_model = InceptionV3(weights='imagenet', include_top=False, input_shape=input_shape)
+
+        x = base_model.layers[-1].output
+        x = Dropout(0.5)(x)
+	x = Conv2D(8, (3, 3), activation='relu')(x)
+        x = GlobalAveragePooling2D()(x)
+        x = Activation('softmax')(x)
+
+        model = Model(inputs=base_model.input, outputs=x)
+        model.compile(optimizer=optimizer, loss="categorical_crossentropy")
+
+        return(base_model, model)
 
 def addConvBlock(model, layers, nf, input_shape=None):
         for i in range(layers):
@@ -165,17 +182,32 @@ def createVggFCN():
 	addConvBlock(base_model, 3, 512)
 	addConvBlock(base_model, 3, 512)
 	base_model.load_weights(get_file("vgg16_weights_th_dim_ordering_th_kernels_notop.h5", WEIGHTS, cache_subdir='models'))
+	# Fully connected output
 	x = base_model.output
 	x = BatchNormalization()(x)
-	x = Conv2D(512, (3, 3))(x)
+	x = Conv2D(512, (3, 3), activation='relu')(x)
 	x = MaxPooling2D((2, 2))(x)
+	x = Conv2D(8, (3, 3), activation='relu')(x)
 	x = Dropout(0.5)(x)
-	x = Conv2D(8, (3, 3))(x)
 	x = GlobalAveragePooling2D()(x)
-	x = Dropout(0.5)(x)
 	x = Activation('softmax')(x)
 	model = Model(inputs=base_model.input, outputs=x)
 	return(base_model, model)
+
+def createResNetModel(input_shape=(3, 512, 512), optimizer=Adam(lr=0.001)):
+        base_model = ResNet50(weights='imagenet', include_top=False, input_shape=input_shape)
+
+        x = base_model.layers[-1].output
+        x = GlobalAveragePooling2D()(x)
+	x = Dropout(0.5)(x)
+        x = Dense(1024, activation='relu')(x)
+        x = Dense(2048, activation='relu')(x)
+        x = Dense(8, activation='softmax')(x)
+
+        model = Model(input=base_model.input, outputs=x)
+        model.compile(optimizer=optimizer, loss="categorical_crossentropy")
+
+        return(base_model, model)
 
 size = (512, 512)
 
@@ -183,25 +215,34 @@ size = (512, 512)
 train = False
 
 if train:
-	train_X, train_Y, valid_X, valid_Y = loadTrainAndValidationDatasets(size)
+	train_X, train_lbls, valid_X, valid_lbls = loadTrainAndValidationDatasets(size)
+	train_Y = to_categorical(train_lbls)
+	valid_Y = to_categorical(valid_lbls)
+
+	start = datetime.datetime.now()
 
 	#### For InceptionV3, first make the base untrainable and train only the top
 	print("### Creating model...")
 	optimizer = SGD(lr=1e-2, decay=1e-4, momentum=0.89, nesterov=False)
 	base, model = createInceptionV3(optimizer=optimizer)
+#	base, model = createInceptionFCN(optimizer=optimizer)
+#	base, model = createVggFCN()
+#	base, model = createResNetModel()
 	print("Done")
 
 	for layer in base.layers:
 		layer.trainable = False
 
 	print("### Compiling model...")
-	model.compile(optimizer=Adam(lr=0.001), loss="categorical_crossentropy", metrics=['accuracy'])
+	model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=['accuracy'])
 
 	print("### Fitting model...")
-	model.fit(x=train_X, y=train_Y, batch_size=32, epochs=10, verbose=2, validation_data=(valid_X, valid_Y) )
+	model.fit(x=train_X, y=train_Y, batch_size=64, epochs=10, verbose=2, validation_data=(valid_X, valid_Y) )
 
 	#### Now finetune the InceptionV3 model
 	print("### Finetune phase started...")
+	### Layer 171: for Inception
+	### Layer 20: for VGG16
 	for layer in base.layers[171:]:
 		layer.trainable = True
 
@@ -209,11 +250,43 @@ if train:
 	model.compile(optimizer=optimizer,  loss="categorical_crossentropy", metrics=['accuracy'])
 
 	print("### Fitting model...")
-	model.fit(x=train_X, y=train_Y, batch_size=32, epochs=10, verbose=2, validation_data=(valid_X, valid_Y) )
+	model.fit(x=train_X, y=train_Y, batch_size=64, epochs=10, verbose=2, validation_data=(valid_X, valid_Y) )
 
 	print("### Saving weights...")
-	model.save_weights("inception_ft.h5")
+	model.save_weights("inception_ft_4_16.h5")
+	print("Done. Time taken = " + str(datetime.datetime.now() - start))
 
+	### Drop top and save conversions
+        new_model = InceptionV3(weights='imagenet', include_top=False, input_shape=(512, 512))
+        new_model.add(Dropout(0.5))
+        new_model.add(GlobalAveragePooling2D())
+        new_model.add(Dense(1024, activation='relu'))
+        new_model.add(Dense(8, activation='softmax'))
+        new_model.load_weights("inception_ft_4_16.h5")
+	
+	new_model.pop()
+	new_model.pop()
+	
+	new_model.compile(optimizer=optimizer,  loss="categorical_crossentropy")
+
+	train_activations = new_model.predict(train_X, batch_size=128)
+	valid_activations = new_model.predict(train_Y, batch_size=128)
+
+        print("Train_activations shape = " + str(train_activations.shape))
+        print("Valid_activations shape = " + str(valid_activations.shape))
+
+	train_df = pd.DataFrame(train_activations)
+        train_df.loc[:, 'class'] = pd.Series(train_lbls, index=train_df.index)
+        valid_df = pd.DataFrame(valid_activations)
+        valid_df.loc[:, 'class'] = pd.Series(valid_lbls, index=valid_df.index)
+        cols = list(train_df)
+        cols = cols[-1:] + cols[:-1]
+        train_df = train_df[cols]
+        valid_df = valid_df[cols]
+        train_df.to_csv("train.csv")
+        valid_df.to_csv("valid.csv")
+        exit(0)
+	
 else:
 	print("### Creating model...")
 
@@ -221,7 +294,7 @@ else:
         base, model = createInceptionV3(optimizer=optimizer)
 
 	print("### Loading weights...")
-	model.load_weights("inception_ft.h5")
+	model.load_weights("inception_ft_4_16.h5")
 
 	### Expects testdata as a numpy array of shape (size, 3, x, x)
 	def get_im_cv2(path, target_size=(512, 512)):
@@ -271,10 +344,12 @@ else:
 				names.append(os.path.basename(f))
 			print("# Predicting batch...")
 			data = np.array(data)
-			out = model.predict(data, batch_size=64)
+#			out = model.predict(data, batch_size=batch_size)
+			out = model([data, 0])[0]
 			preds.append(out)
 
-		preds = np.concatenate(preds)
+		print("Shape of out = " + str(out.shape))
+		preds = np.concatenate(np.array(preds))
 		print("Verification: Preds shape = " + str(preds.shape) + ", names = " + str(len(names)) )
 		return(preds, names)
 
@@ -287,29 +362,74 @@ else:
 		print("# Writing to CSV...")
                 res.to_csv("output.csv", index=False)
 
+	### Get embeddings
+	train_X, train_lbls, valid_X, valid_lbls = loadTrainAndValidationDatasets((512, 512))
+
+        ### Drop top and save conversions
+	f = K.function([model.layers[0].input, K.learning_phase()], [model.layers[-3].output])
+
+	train_out = []
+	valid_out = []
+	batch_size = 64
+	num_batches = train_X.shape[0]/batch_size
+	if train_X.shape[0]%batch_size != 0:
+		num_batches += 1
+	for i in range(num_batches):
+		train_activations = f([train_X[i*batch_size:(i+1)*batch_size], 0])
+		train_out.append(train_activations)
+
+        num_batches = valid_X.shape[0]/batch_size
+        if valid_X.shape[0]%batch_size != 0:
+                num_batches += 1
+
+        for i in range(num_batches):
+		valid_activations = f([valid_X[i*batch_size:(i+1)*batch_size], 0])
+		valid_out.append(valid_activations)
+
+	train_out = np.concatenate(np.array(train_out))
+	train_out = np.concatenate(train_out)
+	valid_out = np.concatenate(np.array(valid_out))
+	valid_out = np.concatenate(valid_out)
+
+        print("Train_activations shape = " + str(train_out.shape))
+        print("Valid_activations shape = " + str(valid_out.shape))
+
+        train_df = pd.DataFrame(train_out)
+        train_df.loc[:, 'class'] = pd.Series(train_lbls, index=train_df.index)
+        valid_df = pd.DataFrame(valid_out)
+        valid_df.loc[:, 'class'] = pd.Series(valid_lbls, index=valid_df.index)
+        cols = list(train_df)
+        cols = cols[-1:] + cols[:-1]
+        train_df = train_df[cols]
+        valid_df = valid_df[cols]
+        train_df.to_csv("train.csv", index=False)
+        valid_df.to_csv("valid.csv", index=False)
+
+#	predict_batches(model, "./TEST/test_stg1/", target_size=(512, 512), batch_size=128)
+#        exit(0)
+
+
 
 	print("### Reading and predicting batches...")
 	start = datetime.datetime.now()
-#	names, test_data = read_test_images("./TEST/ALB/", target_size=size)
-#	test_data = np.array(test_data)
-
-#	print("### Predicting...")
-#	predict(model, test_data, names)
-	test1_preds, test1_names = predict_batches(model, "./TEST/test_stg1/", target_size=(512, 512), batch_size=64)
-
-	test2_preds, test2_names = predict_batches(model, "./TEST/test_stg2/", target_size=(512, 512), batch_size=64)
+	test1_preds, test1_names = predict_batches(f, "./TEST/test_stg1/", target_size=(512, 512), batch_size=64)
+	test2_preds, test2_names = predict_batches(f, "./TEST/test_stg2/", target_size=(512, 512), batch_size=64)
 	test2_names_changed = ["test_stg2/" + name for name in test2_names]
 
 	allPreds = np.concatenate(np.array([test1_preds, test2_preds]))
+	print("AllPreds shape = " + str(allPreds.shape))
 	allNames = test1_names + test2_names_changed
 
-	write_to_csv(allPreds, allNames)
+#	write_to_csv(allPreds, allNames)
+        res = pd.DataFrame(allPreds)
+        res.loc[:, 'image'] = pd.Series(allNames, index=res.index)
+        cols = list(res)
+        cols = cols[-1:] + cols[:-1]
+        res = res[cols]
+        print("# Writing to CSV...")
+        res.to_csv("output.csv", index=False)
+
 
 	print("Done. Time taken = " + str(datetime.datetime.now() - start))
 
 
-# Need to work on prediction code
-#valid_generator = ImageDataGenerator()
-#valid_generator = valid_datagen.flow_from_directory(VALIDATION_PATH, target_size=(512, 512), batch_size=20)
-
-#print(model.predict_generator(test_generator, steps=55))
