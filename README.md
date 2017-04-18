@@ -11,6 +11,7 @@ __NOTE__: This experiment will not run in a normal laptop/PC or will take a long
 We suggest a system with a powerful GPU for tensor processing.
 
 Our setup: ARC compute node **c74/c76** with Nvidia GTX TitanX GPU, 3072 cores, 1000 MHz core clock, 12 GB memory
+Setup.sh script provides code for getting most required packages set up on an ARC node.
 
 ## How to run
 	python inception_ft.py train	# Train the InceptionV3 model
