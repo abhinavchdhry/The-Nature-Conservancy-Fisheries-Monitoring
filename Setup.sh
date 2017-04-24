@@ -1,7 +1,8 @@
 #####Setting up cuda and cudnn in user directory######
 
 #Copy cuda sdk from root to user directory
-cp -r /usr/local/cuda-8.0 {HOME}/program/
+#Added $ as it's a variable
+cp -r /usr/local/cuda-8.0 ${HOME}/program/
 
 #Download cudNN 5.0 from nvidia website
 #I was not able to directly copy using wget, if you guys can then do it
