@@ -9,6 +9,7 @@ cp -r /usr/local/cuda-8.0 ${HOME}/program/
 #I copied it in my local machine and did scp
 #Steps are below
 #The link for cudnn might be different, just test it
+#Ensure you are either in the ssh directory or id_rsa is accessible, quaalified with full path.
 #Uncomment below lines
 
 #sudo scp -i "id_rsa" -o "RSAAuthentication=yes" /home/atit/cudnn-8.0* akshetty@arc10.csc.ncsu.edu:/home/akshetty
