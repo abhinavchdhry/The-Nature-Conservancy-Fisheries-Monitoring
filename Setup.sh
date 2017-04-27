@@ -15,8 +15,13 @@ cp -r /usr/local/cuda-8.0 ${HOME}/program/
 
 #sudo scp -i "id_rsa" -o "RSAAuthentication=yes" /home/atit/cudnn-8.0* akshetty@arc10.csc.ncsu.edu:/home/akshetty
 
+#Or you can use
+#curl -O http://developer.download.nvidia.com/compute/redist/cudnn/v2/cudnn-8.0-linux-x64-v5.1.tgz
+
 #Once copied, extract it using:
 #tar xvzf cudnn-8.0-linux-x64-v5.1.tgz
+#Alternatively you can do a general unzip
+#gunzip cudnn-8.0-linux-x64-v5.1.tgz
 
 #Then do following
 
