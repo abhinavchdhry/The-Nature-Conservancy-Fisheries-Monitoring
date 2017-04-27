@@ -1,22 +1,17 @@
-######################################################################  Atit Shetty ######################################################################
-import os, sys, glob
-
-from sklearn.model_selection import StratifiedShuffleSplit
+######################################################################  Atit Shetty (akshetty)###################################################################
 from sklearn.model_selection import StratifiedKFold
 import shutil
 import numpy as np
-import pandas as pd
 import datetime
 import os, sys, glob
 
 import theano
 
 from keras import backend as K
-from keras.models import Sequential
 from keras.layers import Dense, Activation
-from keras.layers.convolutional import Conv2D, ZeroPadding2D
-from keras.layers.pooling import MaxPooling2D, GlobalAveragePooling2D
-from keras.layers.core import Dropout, Flatten, Lambda
+from keras.layers.convolutional import Conv2D
+from keras.layers.pooling import GlobalAveragePooling2D
+from keras.layers.core import Dropout
 from keras.preprocessing.image import ImageDataGenerator
 from keras.optimizers import Adam, SGD
 from keras.utils import to_categorical
@@ -25,25 +20,27 @@ from keras.applications.vgg16 import VGG16
 from keras.utils import get_file
 
 ORIGINAL_DATAPATH = "./train/"
-TRAIN_PATH = "./KTRAIN/"
-KTH_TRAIN_PATH = TRAIN_PATH+"train"
-VALIDATION_PATH = "./KVALID/"
-KTH_VALID_PATH = VALIDATION_PATH+"valid"
+KTH_TRAIN_PATH = "./KTRAIN/train"
+KTH_VALID_PATH = "./KVALID/valid"
 TEST_PATH = "./TEST/test_stg1/"
 
 NUMBER_OF_FOLDS = 4 
 
+###Generated K-folds based on Class distribution Y
 def stratifiedKFolds(X, Y, num_folds = 3):
 	skf = StratifiedKFold(n_splits=num_folds, shuffle = True, random_state=2017)
 	skf.get_n_splits(X, Y)
+	
 	TrainIDx = []
 	ValidIDx = []
+
 	for train_idx, test_idx in skf.split(X, Y):
 		TrainIDx.append(train_idx)
 		ValidIDx.append(test_idx)
 
 	return(TrainIDx, ValidIDx)
 
+###Save the records in directory
 def createTrainAndValidationDatasets(datapath):
 	print("### Sampling training and validation datasets...")
 	classes = ["LAG", "DOL", "OTHER", "BET", "ALB", "NoF", "YFT", "SHARK"]
@@ -68,12 +65,9 @@ def createTrainAndValidationDatasets(datapath):
 
 	TrainIDx, ValidIDx = stratifiedKFolds(img_names, img_classes, NUMBER_OF_FOLDS)
 
-	#makeDirectoryStructure(KTH_TRAIN_PATH)
-	#makeDirectoryStructure(KTH_VALID_PATH)
-
 	for i in range(1,len(TrainIDx)+1):
-		makeDirectoryStructure(TRAIN_PATH+"/train"+str(i)+"/")
-		makeDirectoryStructure(VALIDATION_PATH+"/valid"+str(i)+"/")	
+		makeDirectoryStructure(KTH_TRAIN_PATH+str(i)+"/")
+		makeDirectoryStructure(KTH_VALID_PATH+"/valid"+str(i)+"/")	
 
 	fold = 1
 	for train_idx in TrainIDx:
@@ -96,15 +90,9 @@ def loadTrainAndValidationDatasets(size, fold):
 	train_datagen = ImageDataGenerator()
 	valid_datagen = ImageDataGenerator()
 
-	#TRAIN_PATH = "./sample/TRAIN/"
-	#VALIDATION_PATH = "./sample/VALID/"
 	classes = ['ALB', 'BET', 'DOL', 'LAG', 'NoF', 'OTHER', 'SHARK', 'YFT']
 	train_generator = train_datagen.flow_from_directory(KTH_TRAIN_PATH+str(fold)+"/", target_size=size, batch_size=1, class_mode='sparse', classes=classes)
 	valid_generator = valid_datagen.flow_from_directory(KTH_VALID_PATH+str(fold)+"/", target_size=size, batch_size=1, class_mode='sparse', classes=classes)
-
-	#TEST_PATH = "./TEST/"
-	#test_datagen = ImageDataGenerator()
-	#test_generator = test_datagen.flow_from_directory(TEST_PATH, target_size=size, batch_size=1)
 
 	print("### Loading datasets...")
 	train_len = len(glob.glob(KTH_TRAIN_PATH+str(fold)+"/"+'*/*.jpg'))
@@ -133,7 +121,7 @@ def loadTrainAndValidationDatasets(size, fold):
 
 	return(train_X, train_Y, valid_X, valid_Y)
 
-
+###Create and return VGG16 FCN model
 def createVGG16(input_shape=(512, 512, 3), optimizer=Adam(lr=0.001), weights = 'imagenet'):
 	base_model = VGG16(weights=weights, include_top=False, input_shape=input_shape)
 	
@@ -149,58 +137,56 @@ def createVGG16(input_shape=(512, 512, 3), optimizer=Adam(lr=0.001), weights = '
 
 	return(base_model, model)
 
+###set True to train VGG16 and create weights file
+train = False 
 
-train = False
 ##########################################################TRAIN VGG16##############################################################################
-if(train)
-
+if train:
+	
+	###Run once to generate directory
 	#createTrainAndValidationDatasets(ORIGINAL_DATAPATH)
 
 	size = (512, 512)
 
 	optimizer = SGD(lr=1e-3, decay=1e-4, momentum=0.89, nesterov=False)
+
 	base,model = createVGG16(optimizer = optimizer)
 	#model.summary()
-
-	for layer in base.layers:
-			layer.trainable = False
-
-	print("### Compiling model...")
-		
-	model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=['accuracy'])
-
-	print("### Fitting model for k  ...")
-
 	for i in range(1,NUMBER_OF_FOLDS+1):
+		if i > 1:
+			model.load_weights("vgg_16_fcn_kfolds.h5")
+
+		for layer in base.layers:
+				layer.trainable = False
+
+		model.compile(optimizer=optimizer, loss="categorical_crossentropy", metrics=['accuracy'])
+
+		print("### Model Fitting")
+
+		
 		train_X, train_lbls, valid_X, valid_lbls = loadTrainAndValidationDatasets(size,i)
 		train_Y = to_categorical(train_lbls)
 		valid_Y = to_categorical(valid_lbls)
 		model.fit(x=train_X, y=train_Y, batch_size=32, epochs=4, verbose=2, validation_data=(valid_X, valid_Y))
-		del train_X, train_Y,valid_X, valid_Y
 
+		print("### Model Finetuning Phase")
 
-	print("### Finetune phase started...")
+		for layer in base.layers[16:]:
+				layer.trainable = True
 
-	for layer in base.layers[16:]:
-			layer.trainable = True
+		model.compile(optimizer=optimizer,  loss="categorical_crossentropy", metrics=['accuracy'])
 
-	model.compile(optimizer=optimizer,  loss="categorical_crossentropy", metrics=['accuracy'])
+		print("### Fitting model...")
 
-	print("### Fitting model...")
-
-	for i in range(NUMBER_OF_FOLDS):
-		train_X, train_lbls, valid_X, valid_lbls = loadTrainAndValidationDatasets(size,i)
-		train_Y = to_categorical(train_lbls)
-		valid_Y = to_categorical(valid_lbls)
 		model.fit(x=train_X, y=train_Y, batch_size=32, epochs=4, verbose=2, validation_data=(valid_X, valid_Y) )
 		del train_X, train_Y,valid_X, valid_Y
 
-	print("### Saving weights...")
-	model.save_weights("vgg_16_fcn_kfolds_atit.h5")
+		print("### Saving weights...")
+		model.save_weights("vgg_16_fcn_kfolds.h5")
 
 
 ############################################################TEST VGG16################################################################################
-else
+else:
 	optimizer = SGD(lr=1e-2, decay=1e-4, momentum=0.89, nesterov=False)
 	base,model = createVGG16(optimizer = optimizer)
 	model.load_weights("vgg_16_fcn_kfolds_atit.h5")
@@ -242,4 +228,3 @@ else
 	submission.insert(0, 'image', testf) 
 	submission.head()
 	submission.to_csv('./results/srun2/S2.csv', index=False)
-
